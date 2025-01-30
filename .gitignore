@@ -1,0 +1,8 @@
+cache
+conf
+*.png
+wandb
+__pycache__
+.vscode
+*.code-workspace
+pics
