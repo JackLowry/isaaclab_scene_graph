@@ -10,7 +10,9 @@
 import argparse
 import datetime
 import glob
+import json
 import pickle
+import random
 
 from omni.isaac.lab.app import AppLauncher
 import math
@@ -87,16 +89,18 @@ def pre_process_actions(delta_pose: torch.Tensor, gripper_command: bool) -> torc
 
 def main():
 
-    action_space_type = ActionSpace.DeltaEndEffectorPose
+    action_space_type = ActionSpace.DeltaJointPos
     policy_type = PolicyType.REPLAY_TRAJECTORY
     observation_type = "image"
+    random.seed(1)
 
     # parse configuration
     env_cfg = FrankaSwipeGrabEnvCfg()
     env_cfg.object_asset_paths = glob.glob("assets/GoogleScanOriginal/*")
-    env_cfg.num_objects = 8
+    random.shuffle(env_cfg.object_asset_paths)
+    env_cfg.num_objects = 6
     env_cfg.randomize_object_positions = True
-    env_cfg.headless = True
+    env_cfg.action_space_type = action_space_type
     # create environment
     env = FrankaSwipeGrabEnv(cfg=env_cfg)
 
@@ -132,6 +136,8 @@ def main():
             run_graphs.append(env.reset_obs)
     
             obs_dict, _ = env.reset()
+            # while True:
+            #     env.step( env._robot.data.default_joint_pos[0] )
             obs = format_observation_for_policy()
             
 
@@ -141,11 +147,50 @@ def main():
     data_path = os.path.join(data_root_path, datetime.datetime.now().strftime('%m-%d-%Y:%H-%M-%S'))
     os.mkdir(data_path)
 
+    dataset_metadata = {
+        "node_data": {},
+        "edge_data": {}
+    }
+
+    node_id_counter = 0
+
+
     for i, run in enumerate(run_graphs):
         os.mkdir(os.path.join(data_path, str(i)))
-        for j, graph in enumerate(run):
+        for j, obs in enumerate(run):
+            graph = obs['policy']['graph'][0]
+            #collate metadata
+            for node in graph['nodes'].values():
+                if node['class_name'] not in dataset_metadata["node_data"].keys():
+                    if node['class_name'] == 'None':
+                        dataset_metadata["node_data"][node['class_name']] = {
+                            'count': 1,
+                            'id': 0
+                        }
+                    else:
+                        dataset_metadata["node_data"][node['class_name']] = {
+                            'count': 1,
+                            'id': node_id_counter
+                        }                       
+                    node_id_counter += 1
+                else:
+                    dataset_metadata["node_data"][node['class_name']]['count'] += 1
+
+            for edge in graph['edges'].values():
+                if edge['name'] not in dataset_metadata["edge_data"].keys():
+                    dataset_metadata["edge_data"][edge['name']] = {
+                        'count': 1,
+                        'id': edge['relation_id']
+                    }
+                else:
+                    dataset_metadata["edge_data"][edge['name']]['count'] += 1
+
             with open(os.path.join(data_path, str(i), f"t_{j}.pkl"), 'wb')as f:
-                pickle.dump(graph, f)
+                pickle.dump(obs['policy'], f)
+    with open(os.path.join(data_path, 'metadata.json'), 'w') as f:
+        json.dump(dataset_metadata, f)
+
+    print(data_path)
 
 
     # close the simulator

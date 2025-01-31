@@ -45,7 +45,8 @@ class FrankaSwipeGrabEnvCfg(DirectRLEnvCfg):
     num_actions = 9
     num_observations = 23
     num_states = 0
-    num_objects = 4
+    num_objects = 6
+    num_loaded_objects =30 
     randomize_object_positions = False
 
     action_space = 9
@@ -80,6 +81,18 @@ class FrankaSwipeGrabEnvCfg(DirectRLEnvCfg):
     robot_root_quat_w = quat_from_euler_xyz(torch.Tensor([0]), torch.Tensor([0]), torch.Tensor([-pi/2]))[0]
     robot_root_pose_w = torch.cat((robot_root_pos_w, robot_root_quat_w)).unsqueeze(0)
 
+    default_joint_state = [
+        0.2745,
+        -1.7059,
+        0.2756,
+        -2.7451,
+        2.7265,
+        3.5525,
+        -1.7363,
+        0.035,
+        0.035
+    ]
+
     robot = ArticulationCfg(
         prim_path="/World/envs/env_.*/Robot",
         spawn=sim_utils.UsdFileCfg(
@@ -95,14 +108,14 @@ class FrankaSwipeGrabEnvCfg(DirectRLEnvCfg):
         ),
         init_state=ArticulationCfg.InitialStateCfg(
             joint_pos={
-                "panda_joint1": 0.2745,
-                "panda_joint2": -1.7059,
-                "panda_joint3": 0.2756,
-                "panda_joint4": -2.7451,
-                "panda_joint5": 2.7265,
-                "panda_joint6": 3.5525,
-                "panda_joint7": -1.7363,
-                "panda_finger_joint.*": 0.035,
+                "panda_joint1": default_joint_state[0],
+                "panda_joint2": default_joint_state[1],
+                "panda_joint3": default_joint_state[2],
+                "panda_joint4": default_joint_state[3],
+                "panda_joint5": default_joint_state[4],
+                "panda_joint6": default_joint_state[5],
+                "panda_joint7": default_joint_state[6],
+                "panda_finger_joint.*": default_joint_state[7],
             },
             pos=robot_root_pos_w,
             rot=robot_root_quat_w,
@@ -176,7 +189,7 @@ class FrankaSwipeGrabEnvCfg(DirectRLEnvCfg):
     shelf_plane_y = 0.5
 
     # camera
-    camera = CameraCfg(
+    wrist_camera = CameraCfg(
         prim_path="/World/envs/env_.*/Robot/panda_hand/WristCam",
         update_period=0,
         height=512,
@@ -188,8 +201,25 @@ class FrankaSwipeGrabEnvCfg(DirectRLEnvCfg):
         spawn=sim_utils.PinholeCameraCfg(
             focal_length=24.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 1.0e5)
         ),
-        offset=CameraCfg.OffsetCfg(pos=(.1, 0, -.08), 
-                                   rot=quat_from_euler_xyz(torch.Tensor([0]), torch.Tensor([-math.pi/2]), torch.Tensor([math.pi]))[0].tolist(), 
+        offset=CameraCfg.OffsetCfg(pos=(.1, 0, 0.6), 
+                                   rot=quat_from_euler_xyz(torch.Tensor([-math.pi/2]), torch.Tensor([0]), torch.Tensor([math.pi]))[0].tolist(), 
+                                   convention="world"),
+    )
+
+    front_camera = CameraCfg(
+        prim_path="/World/envs/env_.*/FrontCam",
+        update_period=0,
+        height=512,
+        width=512,
+        data_types=["rgb", "distance_to_image_plane", "instance_segmentation_fast"],
+        colorize_semantic_segmentation=True,
+        colorize_instance_id_segmentation=True,
+        colorize_instance_segmentation=False,
+        spawn=sim_utils.PinholeCameraCfg(
+            focal_length=24.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 1.0e5)
+        ),
+        offset=CameraCfg.OffsetCfg(pos=(0, 1, 0.7), 
+                                   rot=quat_from_euler_xyz(torch.Tensor([0]), torch.Tensor([0]), torch.Tensor([-math.pi/2]))[0].tolist(), 
                                    convention="world"),
     )
 
@@ -335,9 +365,9 @@ class FrankaSwipeGrabEnv(DirectRLEnv):
         # self.rep_writer = rep.BasicWriter(
         #     output_dir="/home/jack/research/scene_graph/isaaclab_scene_graph/pics",
         #     frame_padding=0,
-        #     colorize_instance_id_segmentation=self.scene.camera.cfg.colorize_instance_id_segmentation,
+        #     colorize_instance_id_segmentation=self.scene.wrist_camera.cfg.colorize_instance_id_segmentation,
         #     colorize_instance_segmentation=True,
-        #     colorize_semantic_segmentation=self.scene.camera.cfg.colorize_semantic_segmentation,
+        #     colorize_semantic_segmentation=self.scene.wrist_camera.cfg.colorize_semantic_segmentation,
         # )
 
         self.target_objects = torch.zeros((self.num_envs), device=self.device, dtype=torch.long)
@@ -356,7 +386,7 @@ class FrankaSwipeGrabEnv(DirectRLEnv):
         # objects
         default_x_positions = []
         
-        object_spacing=0.25
+        object_spacing=0.2
 
         #get position four objects at a time, and then cull to the actual number of objects
         starting_x_offset = -object_spacing/2
@@ -391,9 +421,9 @@ class FrankaSwipeGrabEnv(DirectRLEnv):
         self.default_state = torch.cat([default_pose, zero_vels], dim=1)
 
         # objects starting positions (used when adding objects in and resetting)
-        starting_x_positions = torch.full([self.cfg.num_objects], -1)
-        starting_y_positions = torch.arange(self.cfg.num_objects)
-        starting_z_positions = torch.full([self.cfg.num_objects], 0.0)
+        starting_x_positions = torch.full([self.cfg.num_loaded_objects], -1)
+        starting_y_positions = torch.arange(self.cfg.num_loaded_objects)
+        starting_z_positions = torch.full([self.cfg.num_loaded_objects], 0.0)
 
         self.starting_x_positions = starting_x_positions
         self.starting_y_positions = starting_y_positions
@@ -401,13 +431,14 @@ class FrankaSwipeGrabEnv(DirectRLEnv):
         self.default_rot = default_rot
 
         starting_pos = torch.stack([starting_x_positions, starting_y_positions, starting_z_positions], dim=1)
-        starting_pose = torch.cat([starting_pos, default_rot.repeat(self.cfg.num_objects, 1)], dim=1)
+        starting_pose = torch.cat([starting_pos, default_rot.repeat(self.cfg.num_loaded_objects, 1)], dim=1)
+        zero_vels = torch.zeros((self.cfg.num_loaded_objects, 6))
         self.starting_state = torch.cat([starting_pose, zero_vels], dim=1)
 
         self.obj_metadata = {}
     
         self.objects_dict = {}
-        for o_idx in range(self.cfg.num_objects):
+        for o_idx in range(self.cfg.num_loaded_objects):
             obj_class = self.cfg.object_asset_paths[o_idx].split("/")[-1]
             print(o_idx, obj_class)
             obj_name = f"Object_{o_idx}"
@@ -457,7 +488,8 @@ class FrankaSwipeGrabEnv(DirectRLEnv):
 
         self.scene.objects = RigidObjectCollection(self.objects)
 
-        self.scene.camera = Camera(cfg=self.cfg.camera)
+        self.scene.wrist_camera = Camera(cfg=self.cfg.wrist_camera)
+        self.scene.front_camera = Camera(cfg=self.cfg.front_camera)
 
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
         self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
@@ -563,26 +595,29 @@ class FrankaSwipeGrabEnv(DirectRLEnv):
 
     # post-physics step calls
 
+    def _get_removed_objects(self):
+        selected_objects_for_gather = self.selected_objects.unsqueeze(2).repeat(1,1,3).cuda()
+        object_pos_in_scene = torch.gather(self.scene.objects.data.object_pos_w, 1, selected_objects_for_gather)
+
+        self.removed_objects = object_pos_in_scene[:, :, 1] > self.cfg.shelf_plane_y
+        return self.removed_objects
+
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         self.scene.objects.update(dt=self.physics_dt)
-        removed_objects = self.scene.objects.data.object_pos_w[:, :, 1] > self.cfg.shelf_plane_y
-        terminated = torch.any(removed_objects,dim=1, keepdim=True)
+        self._get_removed_objects()
+
+        terminated = torch.any(self.removed_objects,dim=1, keepdim=True)
 
         truncated = torch.zeros((self.num_envs)) #self.episode_length_buf >= self.max_episode_length - 1
         return terminated, truncated
 
     def _get_rewards(self) -> torch.Tensor:
-
-        removed_objects = self.scene.objects.data.object_pos_w[:, :, 1] > self.cfg.shelf_plane_y
-
         # boolean array for matching the target object
-        target_object_boolean = torch.ones(self.num_envs, self.cfg.num_objects).to(self.device)
-        target_object_boolean = target_object_boolean*torch.arange(self.cfg.num_objects).to(self.device)
 
-        target_object_boolean = target_object_boolean == self.target_objects
+        target_object_boolean = self.selected_objects == self.target_objects
 
         # only the target object should be removed
-        successful_envs = torch.all(removed_objects == target_object_boolean, dim=1, keepdim=True)
+        successful_envs = torch.all(self.removed_objects == target_object_boolean, dim=1, keepdim=True)
 
         return successful_envs
     
@@ -619,7 +654,7 @@ class FrankaSwipeGrabEnv(DirectRLEnv):
             if self.cfg.randomize_object_positions:
                 positions_idxs.append(torch.randperm(self.cfg.num_objects))
             else:
-                positions_idxs.append(torch.Tensor([0,1,2,3]).to(torch.int64))
+                positions_idxs.append(torch.arange(self.cfg.num_objects).to(torch.int64))
         positions_idxs = torch.stack(positions_idxs)
         positions_idxs = positions_idxs.unsqueeze(2).repeat(1,1,13)
 
@@ -627,20 +662,62 @@ class FrankaSwipeGrabEnv(DirectRLEnv):
 
         placement_states = torch.gather(default_states_env, 1, positions_idxs)
         return placement_states
+    
+    def _reset_step(self, render=False):
+        # self._pre_physics_step(torch.zeros((self.num_envs, 9)).cuda())
+        # perform physics stepping
+        for _ in range(self.cfg.decimation):
+            self._sim_step_counter += 1
+            # set actions into buffers
+            self._apply_action()
+            # set actions into simulator
+            self.scene.write_data_to_sim()
+            # simulate
+            self.sim.step(render=False)
+            # render between steps only if the GUI or an RTX sensor needs it
+            # note: we assume the render interval to be the shortest accepted rendering interval.
+            #    If a camera needs rendering at a faster frequency, this will lead to unexpected behavior.
+            if render and self._sim_step_counter % self.cfg.sim.render_interval == 0:
+                self.sim.render()
+            # update buffers at sim dt
+            self.scene.update(dt=self.physics_dt)
+        # self.obs_buf = self._get_observations()
+
+    def _get_observation_for_graph(self):
+        self.scene.front_camera.update(dt=self.sim.get_physics_dt())
+        rgb = self.scene.front_camera.data.output["rgb"]
+        mask = self.scene.front_camera.data.output["instance_segmentation_fast"]
+        depth = self.scene.front_camera.data.output["distance_to_image_plane"]
+        mask_info = self.scene.front_camera.data.info[0]["instance_segmentation_fast"]
+        obj_states = self.scene.objects.data.object_pos_w
+
+        return {"policy":{"graph": self.graphs, 
+                          "images": {
+                              "rgb": rgb.clone(),
+                              "mask": mask.clone(),
+                              "depth": depth.clone(),
+                          },
+                          "object_pos":self.scene.objects.data.object_pos_w.clone(),
+                          "object_quat":self.scene.objects.data.object_quat_w.clone(),
+                          "object_states":obj_states.clone(),
+                          "extra_info": {
+                            "mask_info": mask_info,
+                            "target_id": self.target_objects.clone(),
+                            "object_metadata": self.obj_metadata
+                          }}}        
 
     def _reset_idx(self, env_ids: torch.Tensor | None):
         super()._reset_idx(env_ids)
         # robot state
-        joint_pos = self._robot.data.default_joint_pos[env_ids] + sample_uniform(
-            -0.025,
-            0.025,
-            (len(env_ids), self._robot.num_joints),
-            self.device,
-        )
-        joint_pos = torch.clamp(joint_pos, self.robot_dof_lower_limits, self.robot_dof_upper_limits)
+        joint_pos = self._robot.data.default_joint_pos[env_ids] #+ sample_uniform(
+        #     -0.025,
+        #     0.025,
+        #     (len(env_ids), self._robot.num_joints),
+        #     self.device,
+        # )
         joint_vel = torch.zeros_like(joint_pos)
         self._robot.set_joint_position_target(joint_pos, env_ids=env_ids)
-        self._robot.set_joint_effort_target(torch.zeros_like(joint_pos), env_ids=env_ids)
+        # self._robot.set_joint_effort_target(torch.zeros_like(joint_pos), env_ids=env_ids)
         self._robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
 
         # take all objects out of scene
@@ -657,16 +734,17 @@ class FrankaSwipeGrabEnv(DirectRLEnv):
         object_order_idxs = []
         for i in range(env_ids.shape[0]):
             if self.cfg.randomize_object_positions:
-                object_order_idxs.append(torch.randperm(self.cfg.num_objects))
+                object_order_idxs.append(torch.randperm(self.cfg.num_loaded_objects)[:self.cfg.num_objects])
             else:
-                object_order_idxs.append(torch.Tensor([0,1,2,3]).to(torch.int64))
+                object_order_idxs.append(torch.arange(self.cfg.num_objects).to(torch.int64))
 
         object_order_idxs = torch.stack(object_order_idxs)
+        self.selected_objects = object_order_idxs.cuda()
 
         reset_obs = []
 
-        reset_obs_pose = self.cfg.robot_root_pose_w
-        reset_obs_pose[:, 1] += 1
+        reset_obs_pose = self.cfg.robot_root_pose_w.clone()
+        reset_obs_pose[:, 2] += 10
         self._robot.write_root_pose_to_sim(
                 root_pose=reset_obs_pose.cuda(),
                 env_ids=env_ids,
@@ -680,25 +758,20 @@ class FrankaSwipeGrabEnv(DirectRLEnv):
             )
 
             #simulate for 20 steps
-            for i in range(50):
-                #step sim
-                self.scene.write_data_to_sim()
-                # simulate
-                self.sim.step(render=False)
-            joint_pos = torch.clamp(joint_pos, self.robot_dof_lower_limits, self.robot_dof_upper_limits)
-            joint_vel = torch.zeros_like(joint_pos)
-            self._robot.set_joint_position_target(joint_pos, env_ids=env_ids)
-            self._robot.set_joint_effort_target(torch.zeros_like(joint_pos), env_ids=env_ids)
-            self._robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
-            #step sim
-            self.scene.write_data_to_sim()
-            # simulate
-            self.sim.step(render=False)
-            self.sim.render()
-            # update buffers at sim dt
-            self.scene.update(dt=self.physics_dt)
+            for t in range(20):
+                self._reset_step()
+                joint_vel = torch.zeros_like(joint_pos)
+                self._robot.set_joint_position_target(joint_pos, env_ids=env_ids)
+                # self._robot.set_joint_effort_target(torch.zeros_like(joint_pos), env_ids=env_ids)
+                self._robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
+            for t in range(3):
+                joint_vel = torch.zeros_like(joint_pos)
+                self._robot.set_joint_position_target(joint_pos, env_ids=env_ids)
+                # self._robot.set_joint_effort_target(torch.zeros_like(joint_pos), env_ids=env_ids)
+                self._robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
+                self._reset_step(render=True)
 
-            obs = self._get_observations()
+            obs = self._get_observation_for_graph()
             reset_obs.append(obs)
         self.graphs = create_scene_graph(reset_obs)
         for i in range(len(self.graphs)):
@@ -719,18 +792,15 @@ class FrankaSwipeGrabEnv(DirectRLEnv):
 
         # reset IK controllers
         self.ik_controller.reset(env_ids)
-
-
-
         return
             
 
     def _get_observations(self) -> dict:
-        self.scene.camera.update(dt=self.sim.get_physics_dt())
-        rgb = self.scene.camera.data.output["rgb"]
-        mask = self.scene.camera.data.output["instance_segmentation_fast"]
-        depth = self.scene.camera.data.output["distance_to_image_plane"]
-        mask_info = self.scene.camera.data.info[0]["instance_segmentation_fast"]
+        self.scene.wrist_camera.update(dt=self.sim.get_physics_dt())
+        rgb = self.scene.wrist_camera.data.output["rgb"]
+        mask = self.scene.wrist_camera.data.output["instance_segmentation_fast"]
+        depth = self.scene.wrist_camera.data.output["distance_to_image_plane"]
+        mask_info = self.scene.wrist_camera.data.info[0]["instance_segmentation_fast"]
         obj_states = self.scene.objects.data.object_pos_w
 
         return {"policy":{"graph": self.graphs, 

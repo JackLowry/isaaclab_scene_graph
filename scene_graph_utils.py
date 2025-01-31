@@ -6,26 +6,26 @@ import torch
 
 edge_name_to_id = {
     "no_relation": 0,
-    "right_of": 1,
-    "left_of": 2,
+    "in_front_of": 1,
+    "behind": 2,
     "on_top_of": 3,
     "below": 4,
-    "in_front_of": 5,
-    "behind": 6
+    "right_of": 5,
+    "left_of": 6,
 }
 edge_id_to_name = {edge_name_to_id[name]:name for name in edge_name_to_id}
 
 edge_unit_vector_ordered = [
     [0, 0, 0],
 
-    [0, -1, 0],  #right_of
-    [0,  1, 0], #left_of
+    [0,  1, 0],  #behind
+    [0, -1, 0], #in_front_of
 
     [0, 0,  1],  #on_top_of
     [0, 0, -1], #below
 
-    [-1,  0, 0],  #in_front_of
-    [1, 0, 0]  #behind
+    [-1,  0, 0],  #right_of
+    [ 1,  0, 0]  #left_of
 ]
 edge_unit_vector_ordered = torch.Tensor(edge_unit_vector_ordered).cuda()
 
@@ -38,10 +38,10 @@ def get_bounding_box(mask):
         y_min = 0
         y_max = 0
     else:
-        x_min = int(np.min(indices[1]))
-        x_max = int(np.max(indices[1]))
-        y_min = int(np.min(indices[0]))
-        y_max = int(np.max(indices[0]))
+        x_min = int(indices[:, 1].min())
+        x_max = int(indices[:, 1].max())
+        y_min = int(indices[:, 0].min())
+        y_max = int(indices[:, 0].max())
 
     bbox = torch.Tensor((x_min, y_min, x_max, y_max))
     
@@ -56,7 +56,7 @@ def get_union_bounding_box(bbox1, bbox2):
     return torch.Tensor(union_bbox)
 
 
-def create_scene_graph(reset_obs, distance_cutoff = 0.2):
+def create_scene_graph(reset_obs, distance_cutoff = 0.3):
 
     graphs = []
     for graph_idx, obs in enumerate(reset_obs):
@@ -67,13 +67,21 @@ def create_scene_graph(reset_obs, distance_cutoff = 0.2):
         obj_metadata = obs["policy"]["extra_info"]["object_metadata"]
         obj_states = obs["policy"]["object_states"]
 
-        mask_labels_to_id = {v:k for k,v in mask_metadata['idToLabels'].items()}
+        mask_labels_to_id = {}
+        for k,v in mask_metadata['idToLabels'].items():
+            if v.startswith('/World/envs/'):
+                mask_labels_to_id[v.split("/")[-1]] = k
+            else:
+                mask_labels_to_id[v] = k
+
+        obj_metadata = {k.split("/")[-1]:v for k,v in obj_metadata.items()}
 
 
         nodes = {}
         graphs_env = []
         for env_id in range(obj_states.shape[0]):
             for obj_sim_name in obj_metadata.keys():
+                obj_sim_name = obj_sim_name.split("/")[-1]
                 obj_data = obj_metadata[obj_sim_name]
                 sim_idx = obj_data["sim_idx"]
                 if obj_sim_name in mask_labels_to_id.keys():
@@ -88,7 +96,7 @@ def create_scene_graph(reset_obs, distance_cutoff = 0.2):
                 obj_center = obj_states[env_id, sim_idx]
 
                 # object is not placed yet
-                if abs(obj_center[1]) >  0.8:
+                if obj_center[0] <  -0.8:
                     nodes[obj_sim_name] = {
                         "xyz_center": torch.full_like(obj_center, -1),
                         "class_name": "None",
